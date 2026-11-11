@@ -1,10 +1,9 @@
 # Belote Teranga
 
-Belote, the card game played across Senegal, for phone and computer.
+Belote and Mariage, two card games played across Senegal, for phone and computer.
 
-- Classic rules: turned card, two rounds to choose trump, 162 points per hand
-- Belote-rebelote, dedans and capot
-- Games to 501 or 1,000 points
+- Belote: four players in two teams, 162 points per hand, belote-rebelote, dedans and capot, games to 501 or 1,000
+- Mariage: two players, 66 points to win a deal, mariages worth 20 or 40, first to 7 game points
 - English and French
 - Chat with messages and emojis
 

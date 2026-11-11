@@ -119,6 +119,14 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-o
 .tag{display:inline-block;font-weight:700;font-size:12px;border-radius:99px;padding:2px 10px;background:var(--felt);color:var(--ivory);margin-bottom:8px}
 .tag.bad{background:var(--red)}
 .toast{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);background:var(--ivory);color:var(--ink);font-weight:700;border-radius:12px;padding:10px 16px;z-index:3;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.pile{position:absolute;left:14px;top:46%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;text-align:center}
+.pile .card.off{opacity:.45}
+.stockback{width:var(--cw);height:calc(var(--cw)*1.42);border-radius:calc(var(--cw)*.11);border:2px solid rgba(247,242,228,.85);background:repeating-linear-gradient(45deg,#a82b22 0 4px,#cf3a2e 4px 8px);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:800;font-size:20px;color:var(--ivory);text-shadow:0 1px 3px #000;box-shadow:0 3px 8px rgba(0,0,0,.35)}
+.mpts{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;background:rgba(0,0,0,.3);border-radius:99px;padding:1px 9px}
+.merow .mpts{position:absolute;left:0;top:50%;transform:translateY(-50%)}
+.hand .card.mar{box-shadow:0 0 0 3px var(--gold),0 3px 8px rgba(0,0,0,.35)}
+.gamepick button{white-space:normal;line-height:1.2;padding:10px 6px}
+.gamepick small{display:block;font-weight:600;font-size:11px;opacity:.8}
 .merow{position:relative;width:100%;display:flex;justify-content:center;align-items:center;min-height:36px}
 .chatbtn{position:absolute;right:0;top:50%;transform:translateY(-50%);background:var(--gold);color:var(--ink);font-weight:700;border-radius:99px;padding:7px 14px;box-shadow:0 2px 0 #9b7718}
 .chatbtn:hover{filter:brightness(1.07)}
@@ -341,11 +349,142 @@ var Belote=(function(){
   return {SUITS:SUITS,team:team,next:next,pts:pts,str:str,newGame:newGame,bid:bid,legal:legal,play:play,
     winning:winning,resolveTrick:resolveTrick,nextHand:nextHand,botBid:botBid,botCard:botCard};
 })();
+var Mariage=(function(){
+  var SUITS=['S','H','D','C'],RANKS=['7','8','9','J','Q','K','10','A'];
+  var PTS={A:11,'10':10,K:4,Q:3,J:2,'9':0,'8':0,'7':0};
+  function rank(c){return RANKS.indexOf(c.r)}
+  function pts(c){return PTS[c.r]}
+  function total(m,p){return m.pts[p]+m.meld[p]}
+  function has(m,p,s,r){return m.hands[p].some(function(c){return c.s===s&&c.r===r})}
+  function newMatch(target,rng){
+    rng=rng||Math.random;
+    var m={kind:'mariage',gp:[0,0],target:target,dealer:Math.floor(rng()*2),dealNo:0,rng:rng};
+    newDeal(m);return m;
+  }
+  function newDeal(m){
+    var d=[],i,j,t;
+    SUITS.forEach(function(s){RANKS.forEach(function(r){d.push({s:s,r:r,id:s+r})})});
+    for(i=d.length-1;i>0;i--){j=Math.floor(m.rng()*(i+1));t=d[i];d[i]=d[j];d[j]=t}
+    m.dealNo++;m.hands=[d.slice(0,6),d.slice(6,12)];m.turnUp=d[12];m.trump=d[12].s;m.stock=d.slice(13);
+    m.closed=false;m.closer=null;m.closerOppTricks=0;m.phase='play';m.leader=m.turn=1-m.dealer;
+    m.trick=[];m.pending=false;m.pts=[0,0];m.meld=[0,0];m.pend=[0,0];m.tricks=[0,0];m.played=[];
+    m.says={};m.result=null;m.lastWinner=null;m.lastBonus=null;
+  }
+  function pile(m){return m.closed?0:m.stock.length+(m.turnUp?1:0)}
+  function strict(m){return pile(m)===0}
+  function leading(m,p){return m.phase==='play'&&m.turn===p&&!m.trick.length&&!m.pending}
+  function canSwap(m,p){return leading(m,p)&&!m.closed&&!!m.turnUp&&m.stock.length>0&&m.turnUp.r!=='7'&&has(m,p,m.trump,'7')}
+  function swap(m,p){
+    if(!canSwap(m,p))return false;
+    var h=m.hands[p],i;
+    for(i=0;i<h.length;i++)if(h[i].s===m.trump&&h[i].r==='7'){var t=m.turnUp;m.turnUp=h[i];h[i]=t;break}
+    m.says={};m.says[p]='swap';return true;
+  }
+  function canClose(m,p){return leading(m,p)&&!m.closed&&!!m.turnUp&&m.stock.length>0}
+  function close(m,p){
+    if(!canClose(m,p))return false;
+    m.closed=true;m.closer=p;m.closerOppTricks=m.tricks[1-p];m.says={};m.says[p]='close';return true;
+  }
+  function marriage(m,p,c){
+    if(!leading(m,p)||strict(m))return 0;
+    if(c.r!=='K'&&c.r!=='Q')return 0;
+    if(!has(m,p,c.s,c.r==='K'?'Q':'K'))return 0;
+    return c.s===m.trump?40:20;
+  }
+  function legal(m,p){
+    var h=m.hands[p];
+    if(!m.trick.length||!strict(m))return h.slice();
+    var led=m.trick[0].c.s,same=h.filter(function(c){return c.s===led});
+    if(same.length)return same;
+    var tp=h.filter(function(c){return c.s===m.trump});
+    return tp.length?tp:h.slice();
+  }
+  function beats(m,a,b){return b.s===a.s?rank(b)>rank(a):b.s===m.trump}
+  function play(m,p,id){
+    if(m.phase!=='play'||m.turn!==p||m.pending)return false;
+    var c=legal(m,p).filter(function(x){return x.id===id})[0];
+    if(!c)return false;
+    var v=marriage(m,p,c);
+    m.hands[p]=m.hands[p].filter(function(x){return x.id!==id});
+    if(!m.trick.length)m.says={};
+    m.trick.push({p:p,c:c});m.played.push(id);
+    if(v){
+      m.says[p]='marry'+v;
+      if(m.tricks[p]>0)m.meld[p]+=v;else m.pend[p]+=v;
+      if(total(m,p)>=66){finish(m,p,'66');return true}
+    }
+    if(m.trick.length===2){m.pending=true;m.lastWinner=beats(m,m.trick[0].c,m.trick[1].c)?m.trick[1].p:m.trick[0].p}
+    else m.turn=1-p;
+    return true;
+  }
+  function draw(m){if(m.stock.length)return m.stock.shift();var t=m.turnUp;m.turnUp=null;return t}
+  function resolve(m){
+    if(!m.pending)return;
+    var w=m.lastWinner,l=1-w;
+    m.pts[w]+=pts(m.trick[0].c)+pts(m.trick[1].c);m.tricks[w]++;
+    if(m.pend[w]){m.meld[w]+=m.pend[w];m.pend[w]=0}
+    m.trick=[];m.pending=false;m.says={};
+    if(pile(m)>0){m.hands[w].push(draw(m));m.hands[l].push(draw(m))}
+    m.leader=m.turn=w;
+    if(total(m,w)>=66){finish(m,w,'66');return}
+    if(!m.hands[0].length){
+      if(m.closed){finish(m,1-m.closer,'closed');return}
+      m.pts[w]+=10;m.lastBonus=w;
+      var a=total(m,0),b=total(m,1);
+      finish(m,a===b?1-m.dealer:(a>b?0:1),'end');
+    }
+  }
+  function finish(m,w,why){
+    var l=1-w,n;
+    if(m.closed&&w!==m.closer){n=m.closerOppTricks===0?3:2;why='closed'}
+    else n=m.tricks[l]===0?3:(total(m,l)<33?2:1);
+    m.gp[w]+=n;
+    m.result={winner:w,gpts:n,why:why,pts:m.pts.slice(),meld:m.meld.slice(),tricks:m.tricks.slice(),totals:[total(m,0),total(m,1)]};
+    m.phase=m.gp[w]>=m.target?'matchEnd':'dealEnd';
+  }
+  function nextDeal(m){if(m.phase!=='dealEnd')return;m.dealer=1-m.dealer;newDeal(m)}
+  function botMove(m,p){
+    if(canSwap(m,p))return {swap:true};
+    var h=m.hands[p],L=legal(m,p),tr=m.trump;
+    function pair(c){return (c.r==='K'&&has(m,p,c.s,'Q'))||(c.r==='Q'&&has(m,p,c.s,'K'))}
+    function low(a){return a.slice().sort(function(x,y){return (x.s===tr)-(y.s===tr)||pts(x)-pts(y)||rank(x)-rank(y)})[0]}
+    function master(c){
+      return RANKS.every(function(r){
+        var id=c.s+r;
+        return RANKS.indexOf(r)<=rank(c)||m.played.indexOf(id)>=0||h.some(function(x){return x.id===id});
+      });
+    }
+    if(!m.trick.length){
+      if(!strict(m)){
+        var mar=h.filter(function(c){return c.r==='Q'&&pair(c)}).sort(function(x,y){return (y.s===tr)-(x.s===tr)});
+        if(mar.length)return {card:mar[0]};
+        var pool=h.filter(function(c){return c.s!==tr&&!pair(c)&&pts(c)<10});
+        return {card:low(pool.length?pool:h)};
+      }
+      var ms=L.filter(master).sort(function(x,y){return (y.s===tr)-(x.s===tr)||pts(y)-pts(x)});
+      return {card:ms.length?ms[0]:low(L)};
+    }
+    var lead=m.trick[0].c;
+    var wins=L.filter(function(c){return beats(m,lead,c)}).sort(function(x,y){return rank(x)-rank(y)});
+    if(strict(m))return {card:wins.length?wins[0]:low(L)};
+    var same=wins.filter(function(c){return c.s===lead.s});
+    if(same.length){var top=same[same.length-1];if(pts(top)>=10||pts(lead)>=4)return {card:top}}
+    if(pts(lead)>=10||total(m,p)+pts(lead)>=56){
+      var tw=wins.filter(function(c){return c.s===tr&&!pair(c)});
+      if(tw.length)return {card:tw[0]};
+      if(wins.length)return {card:wins[0]};
+    }
+    var dump=L.filter(function(c){return c.s!==tr&&!pair(c)&&pts(c)<10});
+    return {card:low(dump.length?dump:L)};
+  }
+  return {newMatch:newMatch,nextDeal:nextDeal,rank:rank,pts:pts,total:total,pile:pile,strict:strict,canSwap:canSwap,swap:swap,
+    canClose:canClose,close:close,marriage:marriage,legal:legal,beats:beats,play:play,resolve:resolve,botMove:botMove};
+})();
 //</engine>
 </script>
 <script>
 (function(){
-var B=Belote, app=document.getElementById('app');
+var B=Belote, M=Mariage, app=document.getElementById('app');
 var SYM={S:'♠',H:'♥',D:'♦',C:'♣'};
 var RK={en:{J:'J',Q:'Q',K:'K',A:'A'},fr:{J:'V',Q:'D',K:'R',A:'A'}};
 var TX={
@@ -359,6 +498,16 @@ var TX={
   settings:'New game',setP:'Starting a new game clears the current score.',you:'You',partner:'Partner (top)',right:'Right',left:'Left',target:'Play to',
   start:'Start game',cancel:'Back to game',values:'Card values',valP:'The Jack and 9 are the top cards in trump. Last trick is worth 10. Each hand has 162 points; the taker’s team must outscore the other team.',
   rank:'Card',inT:'Trump',inP:'Other suits',close:'Close',dealer:'D',pts:'points',sound:'Sound',rules:'Values',credit:'Nioro Resources LLC',
+  choose:'Choose a game',gB:'Belote',gBs:'4 players, 2 teams',gM:'Mariage',gMs:'2 players, head to head',opp:'Opponent',
+  descB:'Take the turned card or name a trump, then win more than half of the 162 points with your partner.',
+  descM:'Six cards each. Reach 66 points to win the deal. King and Queen of a suit is a mariage: 20 points, or 40 in trump. First to 7 game points wins.',
+  deal:'Deal {n}',goalM:'first to {n}',stock:'Stock',closedL:'Closed',trumpL:'Trump',
+  mLead:'Your lead.',mAny:'Your turn. Play any card.',mFollow:'Your turn. Follow suit, or trump.',mGold:'Gold cards score a mariage.',
+  swapB:'Swap your 7 for {c}',closeB:'Close the stock',sSwap:'I swap the 7',sClose:'I close!',sMar:'Mariage! +{n}',
+  mWin:'You win the deal',mLose:'{n} wins the deal',mWinM:'You win the match',mLoseM:'{n} wins the match',gp:'{n} game point(s)',
+  why66:'{n} reached 66 points.',whyEnd:'All cards played. The higher total wins.',whyClosed:'{n} closed the stock and did not reach 66.',
+  mars:'Mariages',mTot:'Deal total',gpts:'Game points',nextD:'Next deal',
+  valPM:'Ace and 10 are the top cards in every suit. King and Queen of one suit is a mariage: 20 points, 40 in trump, declared when you lead one of them. Reach 66 to win the deal. Last trick is worth 10 when the stock runs out.',
   chat:'Chat',toAll:'All',toX:'to {n}',sendTo:'Send to',write:'Write a short message',send:'Send',
   lines:['Too easy!','You are dedans!','Is that all you have?','Thanks for the points','Play faster!','Watch and learn','Well played, partner','Ouch!'],
   bCut:['Thanks for the points','I cut that!','Not today'],bDedans:['Dedans!','You fell short!','Who told you to take?'],
@@ -373,12 +522,22 @@ var TX={
   settings:'Nouvelle partie',setP:'Une nouvelle partie remet les scores à zéro.',you:'Toi',partner:'Partenaire (en haut)',right:'À droite',left:'À gauche',target:'Partie en',
   start:'Commencer',cancel:'Retour au jeu',values:'Valeur des cartes',valP:'Le Valet et le 9 sont les plus forts à l’atout. Le dernier pli vaut 10. Chaque donne compte 162 points ; l’équipe qui prend doit marquer plus que l’autre.',
   rank:'Carte',inT:'Atout',inP:'Autres couleurs',close:'Fermer',dealer:'D',pts:'points',sound:'Son',rules:'Valeurs',credit:'Nioro Resources LLC',
+  choose:'Choisis un jeu',gB:'Belote',gBs:'4 joueurs, 2 \u00e9quipes',gM:'Mariage',gMs:'2 joueurs, face \u00e0 face',opp:'Adversaire',
+  descB:'Prends la retourne ou annonce un atout, puis marque plus de la moiti\u00e9 des 162 points avec ton partenaire.',
+  descM:'Six cartes chacun. Atteins 66 points pour gagner la donne. Roi et Dame d\u2019une couleur font un mariage : 20 points, ou 40 \u00e0 l\u2019atout. Le premier \u00e0 7 points de partie gagne.',
+  deal:'Donne {n}',goalM:'premier \u00e0 {n}',stock:'Talon',closedL:'Ferm\u00e9',trumpL:'Atout',
+  mLead:'\u00c0 toi d\u2019entamer.',mAny:'\u00c0 toi. Joue la carte que tu veux.',mFollow:'\u00c0 toi. Fournis la couleur, sinon coupe.',mGold:'Les cartes dor\u00e9es marquent un mariage.',
+  swapB:'\u00c9changer ton 7 contre {c}',closeB:'Fermer le talon',sSwap:'J\u2019\u00e9change le 7',sClose:'Je ferme !',sMar:'Mariage ! +{n}',
+  mWin:'Tu gagnes la donne',mLose:'{n} gagne la donne',mWinM:'Tu gagnes la partie',mLoseM:'{n} gagne la partie',gp:'{n} point(s) de partie',
+  why66:'{n} a atteint 66 points.',whyEnd:'Toutes les cartes sont jou\u00e9es. Le plus haut total gagne.',whyClosed:'{n} a ferm\u00e9 le talon sans atteindre 66.',
+  mars:'Mariages',mTot:'Total de la donne',gpts:'Points de partie',nextD:'Donne suivante',
+  valPM:'L\u2019As et le 10 sont les plus forts dans chaque couleur. Roi et Dame d\u2019une couleur font un mariage : 20 points, 40 \u00e0 l\u2019atout, annonc\u00e9 en entamant l\u2019une des deux cartes. Atteins 66 pour gagner la donne. Le dernier pli vaut 10 quand le talon est \u00e9puis\u00e9.',
   chat:'Chat',toAll:'Tous',toX:'\u00e0 {n}',sendTo:'Envoyer \u00e0',write:'\u00c9cris un petit message',send:'Envoyer',
   lines:['Trop facile !','Vous \u00eates dedans !','C\u2019est tout ?','Merci pour les points','Joue plus vite !','Regarde et apprends','Bien jou\u00e9 partenaire','A\u00efe !'],
   bCut:['Merci pour les points','Je coupe !','Pas aujourd\u2019hui'],bDedans:['Dedans !','Vous chutez !','Qui t\u2019a dit de prendre ?'],
   bPraise:['Bien jou\u00e9 partenaire','C\u2019est comme \u00e7a qu\u2019on fait'],bBoast:['Trop facile !','Regarde et apprends'],bBack:['On verra','Parle toujours','Joue ta carte','Ha ! Attends un peu']}
 };
-var cfg={lang:(navigator.language||'en').slice(0,2)==='fr'?'fr':'en',names:['AB','Katim','Yama','Cous Cous'],target:501,sound:true};
+var cfg={lang:(navigator.language||'en').slice(0,2)==='fr'?'fr':'en',names:['AB','Katim','Yama','Cous Cous'],target:501,sound:true,game:'belote'};
 try{var sv=JSON.parse(localStorage.getItem('belote-teranga')||'null');if(sv){for(var k in sv)if(k in cfg)cfg[k]=sv[k]}}catch(e){}
 function save(){try{localStorage.setItem('belote-teranga',JSON.stringify(cfg))}catch(e){}}
 function t(k,v){var s=TX[cfg.lang][k];if(v)for(var x in v)s=s.replace('{'+x+'}',v[x]);return s}
@@ -477,19 +636,19 @@ function fly(from,to,em){
 function say(from,to,m){ /* to: seat number, or null for everyone. m: {e:emoji} or {t:text} */
   if(m.e){
     snd('whoosh');
-    (to===null?[0,1,2,3].filter(function(q){return q!==from}):[to]).forEach(function(q){fly(from,q,m.e)});
+    (to===null?seats().filter(function(q){return q!==from}):[to]).forEach(function(q){fly(from,q,m.e)});
   }else{
     bubble(from,(to!==null?'<small>'+esc(t('toX',{n:g.names[to]}))+'</small>':'')+esc(m.t));snd('msg');
   }
   if(from===0)botAnswer(to,m);
 }
 function botAnswer(to,m){
-  var who=to===null?pick([1,2,3]):to;
+  var who=to===null?pick(seats().filter(function(q){return q!==0})):to,mate=g.kind!=='mariage'&&who===2;
   if(Math.random()>.7)return;
   setTimeout(function(){
     var L=TX[cfg.lang];
-    if(m.e)say(who,0,{e:who===2?pick(['👏','😂','💪']):pick(['😎','🤫','😂','🥱'])});
-    else say(who,0,{t:who===2?pick(L.bPraise):pick(L.bBack)});
+    if(m.e)say(who,0,{e:mate?pick(['👏','😂','💪']):pick(['😎','🤫','😂','🥱'])});
+    else say(who,0,{t:mate?pick(L.bPraise):pick(L.bBack)});
   },m.e?2400:1500);
 }
 function botSay(from,to,kind){
@@ -514,8 +673,8 @@ function handTalk(){
 }
 function renderChat(){
   var old=document.getElementById('msg'),keep=old?old.value:'';
-  var h='<div class="chatbox" role="dialog" aria-label="'+t('chat')+'"><div class="chead"><label>'+t('sendTo')+'</label><button class="x" data-c="close" aria-label="'+t('close')+'">×</button></div><div class="seg">';
-  [null,1,2,3].forEach(function(p){
+  var h='<div class="chatbox" role="dialog" aria-label="'+t('chat')+'"><div class="chead"><label>'+t('sendTo')+'</label><button class="x" data-c="close" aria-label="'+t('close')+'">×</button></div><div class="seg"'+(g.kind==='mariage'?' hidden':'')+'>';
+  (g.kind==='mariage'?[2]:[null,1,2,3]).forEach(function(p){
     h+='<button data-c="to" data-p="'+(p===null?'all':p)+'" aria-pressed="'+(chatTo===p)+'">'+(p===null?t('toAll'):esc(g.names[p]))+'</button>';
   });
   h+='</div><div class="emos">'+EMO.map(function(e){return '<button data-c="emo" data-e="'+e+'">'+e+'</button>'}).join('')+'</div>';
@@ -546,13 +705,14 @@ function cardHTML(c,cls,tag,attr){
 }
 function sortHand(h){
   var base=['S','H','C','D'],i=g.trump?base.indexOf(g.trump):0,ord=base.slice(i).concat(base.slice(0,i));
-  return h.slice().sort(function(a,b){return ord.indexOf(a.s)-ord.indexOf(b.s)||B.str(b,g.trump)-B.str(a,g.trump)});
+  var st=g.kind==='mariage'?function(c){return M.rank(c)}:function(c){return B.str(c,g.trump)};
+  return h.slice().sort(function(a,b){return ord.indexOf(a.s)-ord.indexOf(b.s)||st(b)-st(a)});
 }
 function sayText(p){var s=g.says[p];if(!s)return '';
   if(s==='take')return t('sTake')+' '+SYM[g.trump];
   return t({pass:'sPass',belote:'belote',rebelote:'rebelote'}[s]);}
 function nameTag(p){
-  return '<div class="name" id="seat'+p+'">'+esc(g.names[p])+(g.dealer===p?'<span class="chip" title="Dealer">'+t('dealer')+'</span>':'')+
+  return '<div class="name" id="seat'+p+'">'+esc(g.names[p])+((g.kind==='mariage'?g.dealer*2:g.dealer)===p?'<span class="chip" title="Dealer">'+t('dealer')+'</span>':'')+
     (g.taker===p?'<span class="tk">'+sym(g.trump)+'</span>':'')+'</div>';
 }
 function seat(p,pos){
@@ -572,7 +732,14 @@ function status(){
   }
   return t(g.trick.length?'yourTurn':'lead');
 }
-function render(){
+function toolsHTML(){
+  return '<div class="tools"><button class="tool" data-a="values" title="'+t('values')+'">'+t('rules')+'</button><button class="tool" data-a="lang">'+(cfg.lang==='fr'?'EN':'FR')+'</button>'+
+     '<button class="tool" data-a="sound" aria-pressed="'+cfg.sound+'" title="'+t('sound')+'">'+(cfg.sound?'\u266a':'\u2715')+'</button><button class="tool" data-a="settings" title="'+t('settings')+'">+</button></div>';
+}
+function seats(){return g.kind==='mariage'?[0,2]:[0,1,2,3]}
+function render(){if(g.kind==='mariage')renderM();else renderB()}
+function tick(){if(g.kind==='mariage')tickM();else tickB()}
+function renderB(){
   var bidding=g.phase==='bid1'||g.phase==='bid2',h='';
   h+='<div class="bar"><div class="score"><div class="team us"><span>'+t('us')+'</span><b>'+g.scores[0]+'</b></div><div class="team"><span>'+t('them')+'</span><b>'+g.scores[1]+'</b></div></div>'+
      '<div class="tools"><button class="tool" data-a="values" title="'+t('values')+'">'+t('rules')+'</button><button class="tool" data-a="lang">'+(cfg.lang==='fr'?'EN':'FR')+'</button>'+
@@ -597,6 +764,74 @@ function render(){
   app.innerHTML=h;
   document.documentElement.lang=cfg.lang;
 }
+function sayM(i){
+  var s=g.says[i];if(!s)return '';
+  if(s==='swap')return t('sSwap');
+  if(s==='close')return t('sClose');
+  return t('sMar',{n:s.slice(5)});
+}
+function renderM(){
+  var h='',over=g.phase!=='play',myTurn=g.turn===0&&!g.pending&&!over,lead=myTurn&&!g.trick.length,pile=M.pile(g);
+  h+='<div class="bar"><div class="score"><div class="team us"><span>'+esc(g.names[0])+'</span><b>'+g.gp[0]+'</b></div><div class="team"><span>'+esc(g.names[2])+'</span><b>'+g.gp[1]+'</b></div></div>'+toolsHTML()+'</div>';
+  h+='<div class="info"><span>'+t('deal',{n:g.dealNo})+' \u00b7 '+t('goalM',{n:g.target})+'</span><span><span class="pill">'+t('trump')+' <strong>'+sym(g.trump)+'</strong></span></span></div>';
+  var b='';for(var i=0;i<g.hands[1].length;i++)b+='<span class="back"></span>';
+  h+='<div class="table"><div class="seat n'+(g.turn===1&&!g.pending&&!over?' turn':'')+'">'+nameTag(2)+'<div class="backs">'+b+'</div><div class="mpts">'+M.total(g,1)+' / 66</div><div class="say">'+sayM(1)+'</div></div>';
+  h+='<div class="pile">';
+  if(g.closed)h+='<span>'+t('closedL')+'</span><div class="stockback">\u2715</div>'+(g.turnUp?cardHTML(g.turnUp,'off'):'');
+  else if(pile>0)h+='<span>'+t('stock')+'</span><div class="stockback">'+pile+'</div>'+cardHTML(g.turnUp);
+  else h+='<span>'+t('trumpL')+'</span><div class="pill" style="font-size:22px">'+sym(g.trump)+'</div>';
+  h+='</div><div class="centre">';
+  g.trick.forEach(function(x){
+    h+='<div class="slot p'+(x.p*2)+'">'+cardHTML(x.c,(x.c.id===lastPlayed?'new':'')+(g.pending&&x.p===g.lastWinner?' win':''))+'</div>';
+  });
+  h+='</div></div>';
+  var L=myTurn?M.legal(g,0).map(function(c){return c.id}):[],gold=false,st='';
+  var cards='';
+  sortHand(g.hands[0]).forEach(function(c){
+    var ok=L.indexOf(c.id)>=0,mar=lead&&M.marriage(g,0,c)>0;if(mar)gold=true;
+    cards+=cardHTML(c,(myTurn?(ok?'ok':'no'):'')+(mar?' mar':''),'button',' data-a="card" data-id="'+c.id+'" aria-label="'+rk(c.r)+' '+c.s+'"'+(ok?'':' disabled'));
+  });
+  if(over||g.pending)st='';
+  else if(!myTurn)st=esc(t('playing',{n:g.names[2]}));
+  else if(lead){
+    st='<span style="flex-basis:100%">'+t('mLead')+(gold?' '+t('mGold'):'')+'</span>';
+    if(M.canSwap(g,0))st+='<button class="btn" data-a="mswap">'+t('swapB',{c:rk(g.turnUp.r)+SYM[g.turnUp.s]})+'</button>';
+    if(M.canClose(g,0))st+='<button class="btn ghost" data-a="mclose">'+t('closeB')+'</button>';
+  }else st=t(M.strict(g)?'mFollow':'mAny');
+  h+='<div class="me'+(myTurn?' turn':'')+'"><div class="say">'+sayM(0)+'</div><div class="status" aria-live="polite">'+st+'</div><div class="hand">'+cards+'</div>';
+  h+='<div class="merow"><div class="mpts">'+M.total(g,0)+' / 66</div>'+nameTag(0)+'<button class="chatbtn" data-a="chat">'+t('chat')+'</button></div></div><div class="foot">Belote Teranga \u00b7 '+t('credit')+'</div>';
+  if(sheet)h+='<div class="veil"><div class="sheet" role="dialog" aria-modal="true">'+sheetHTML()+'</div></div>';
+  app.innerHTML=h;
+  document.documentElement.lang=cfg.lang;
+}
+function mTalk(){
+  var r=g.result;if(!r)return;
+  if(g.phase==='matchEnd'){lastBot=0;if(r.winner===1)botSay(2,0,'crown');return}
+  if(r.winner===1&&Math.random()<.7)botSay(2,0,'boast');
+}
+function tickM(){
+  clearTimeout(T);
+  if(g.phase==='dealEnd'&&!sheet){sheet='mdeal';snd('end');mTalk()}
+  if(g.phase==='matchEnd'&&!sheet){sheet='mmatch';snd(g.gp[0]>g.gp[1]?'win':'lose');mTalk()}
+  render();
+  if(sheet)return;
+  if(g.pending){T=setTimeout(function(){var w=g.lastWinner;M.resolve(g);lastPlayed=null;snd(w===0?'trickUs':'trickThem');tick()},1300);return}
+  if(g.turn===0){
+    var key='m'+g.dealNo+'/'+g.played.length;
+    if(key!==pinged){pinged=key;T=setTimeout(function(){snd('turn')},350)}
+    return;
+  }
+  T=setTimeout(function(){
+    var mv=M.botMove(g,1);
+    if(mv.swap){M.swap(g,1);snd('take')}
+    else{
+      var ld=g.trick.length?g.trick[0].c:null;
+      M.play(g,1,mv.card.id);lastPlayed=mv.card.id;snd(g.says[1]?'bel':'card');
+      if(ld&&mv.card.s===g.trump&&ld.s!==g.trump&&M.pts(ld)>=10&&Math.random()<.6)botSay(2,0,'cut');
+    }
+    tick();
+  },950);
+}
 function resultRows(){
   var r=g.result;
   return '<table><thead><tr><th></th><th>'+t('us')+'</th><th>'+t('them')+'</th></tr></thead><tbody>'+
@@ -608,7 +843,20 @@ function resultRows(){
 }
 function sheetHTML(){
   var r=g.result,h='';
-  if(sheet==='hand'||sheet==='game'){
+  if(sheet==='mdeal'||sheet==='mmatch'){
+    var w=r.winner,opn=esc(g.names[2]),wn=w===0?esc(g.names[0]):opn;
+    var closerN=g.closer===0?esc(g.names[0]):opn;
+    h+='<span class="tag'+(w===0?'':' bad')+'">+'+t('gp',{n:r.gpts})+'</span>';
+    h+='<h2>'+(sheet==='mmatch'?(w===0?t('mWinM'):t('mLoseM',{n:opn})):(w===0?t('mWin'):t('mLose',{n:opn})))+'</h2>';
+    h+='<p>'+(r.why==='closed'?t('whyClosed',{n:closerN}):r.why==='end'?t('whyEnd'):t('why66',{n:wn}))+'</p>';
+    h+='<table><thead><tr><th></th><th>'+esc(g.names[0])+'</th><th>'+opn+'</th></tr></thead><tbody>'+
+      '<tr><td>'+t('tricks')+'</td><td>'+r.tricks[0]+'</td><td>'+r.tricks[1]+'</td></tr>'+
+      '<tr><td>'+t('cards')+'</td><td>'+r.pts[0]+'</td><td>'+r.pts[1]+'</td></tr>'+
+      '<tr><td>'+t('mars')+'</td><td>'+r.meld[0]+'</td><td>'+r.meld[1]+'</td></tr>'+
+      '<tr><td>'+t('mTot')+'</td><td>'+r.totals[0]+'</td><td>'+r.totals[1]+'</td></tr>'+
+      '<tr class="tot"><td>'+t('gpts')+'</td><td>'+g.gp[0]+'</td><td>'+g.gp[1]+'</td></tr></tbody></table>';
+    h+=sheet==='mmatch'?'<button class="btn" data-a="again">'+t('again')+'</button>':'<button class="btn" data-a="next">'+t('nextD')+'</button>';
+  }else if(sheet==='hand'||sheet==='game'){
     var key=r.capot!==null?'capot':(r.made?'made':'dedans');
     var v={n:esc(g.names[r.taker]),s:sym(g.trump).replace('suit-r','')};
     if(sheet==='game'){
@@ -617,19 +865,21 @@ function sheetHTML(){
     h+='<p>'+(r.capot!==null?t('capotP'):t(r.made?'madeP':'dedansP',v))+'</p>'+resultRows();
     h+=sheet==='game'?'<button class="btn" data-a="again">'+t('again')+'</button>':'<button class="btn" data-a="next">'+t('next')+'</button>';
   }else if(sheet==='settings'){
-    var lab=['you','right','partner','left'];
-    h+='<h2>'+t('settings')+'</h2><p>'+t('setP')+'</p>';
-    [[0,2],[3,1]].forEach(function(pair){
+    var lab=draft.game==='mariage'?['you','opp']:['you','right','partner','left'];
+    h+='<h2>'+t('choose')+'</h2><div class="seg gamepick" style="margin:10px 0 8px">'+['belote','mariage'].map(function(k){
+      return '<button data-a="game" data-g="'+k+'" aria-pressed="'+(draft.game===k)+'">'+t(k==='belote'?'gB':'gM')+'<small>'+t(k==='belote'?'gBs':'gMs')+'</small></button>'}).join('')+'</div>';
+    h+='<p>'+t(draft.game==='mariage'?'descM':'descB')+'</p>';
+    (draft.game==='mariage'?[[0,1]]:[[0,2],[3,1]]).forEach(function(pair){
       h+='<div class="row">';
       pair.forEach(function(i){h+='<div class="field"><label for="nm'+i+'">'+t(lab[i])+'</label><input type="text" id="nm'+i+'" maxlength="14" value="'+esc(draft.names[i])+'"></div>'});
       h+='</div>';
     });
-    h+='<label>'+t('target')+'</label><div class="seg" style="margin-bottom:14px">'+[501,1000].map(function(n){
+    if(draft.game!=='mariage')h+='<label>'+t('target')+'</label><div class="seg" style="margin-bottom:14px">'+[501,1000].map(function(n){
       return '<button data-a="tgt" data-n="'+n+'" aria-pressed="'+(draft.target===n)+'">'+n.toLocaleString(cfg.lang)+' '+t('pts')+'</button>'}).join('')+'</div>';
     h+='<button class="btn" data-a="start">'+t('start')+'</button><button class="btn ghost" style="color:var(--ink);margin-top:8px;border-color:#b9b199;background:none" data-a="close">'+t('cancel')+'</button>';
   }else if(sheet==='values'){
-    var rows=[['J',20,2],['9',14,0],['A',11,11],['10',10,10],['K',4,4],['Q',3,3],['8',0,0],['7',0,0]];
-    h+='<h2>'+t('values')+'</h2><p>'+t('valP')+'</p><table><thead><tr><th>'+t('rank')+'</th><th>'+t('inT')+'</th><th>'+t('inP')+'</th></tr></thead><tbody>'+
+    var rows=g.kind==='mariage'?[['A',11,11],['10',10,10],['K',4,4],['Q',3,3],['J',2,2],['9',0,0],['8',0,0],['7',0,0]]:[['J',20,2],['9',14,0],['A',11,11],['10',10,10],['K',4,4],['Q',3,3],['8',0,0],['7',0,0]];
+    h+='<h2>'+t('values')+'</h2><p>'+t(g.kind==='mariage'?'valPM':'valP')+'</p><table><thead><tr><th>'+t('rank')+'</th><th>'+t('inT')+'</th><th>'+t('inP')+'</th></tr></thead><tbody>'+
       rows.map(function(x){return '<tr><td>'+rk(x[0])+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td></tr>'}).join('')+'</tbody></table>'+
       '<button class="btn" data-a="close">'+t('close')+'</button>';
   }
@@ -639,7 +889,7 @@ function readDraft(){
   if(sheet!=='settings')return;
   for(var i=0;i<4;i++){var el=document.getElementById('nm'+i);if(el)draft.names[i]=el.value}
 }
-function tick(){
+function tickB(){
   clearTimeout(T);
   if(g.phase==='handEnd'&&!sheet){sheet='hand';snd('end');handTalk()}
   if(g.phase==='gameEnd'&&!sheet){sheet='game';snd(g.winner===0?'win':'lose');handTalk()}
@@ -662,30 +912,39 @@ function tick(){
     tick();
   },g.phase==='play'?800:950);
 }
-function start(){g=B.newGame(cfg.names.slice(),cfg.target);sheet=null;lastPlayed=null;closeChat();snd('deal');tick()}
+function start(){
+  if(cfg.game==='mariage'){g=M.newMatch(7);g.names=[cfg.names[0],'',cfg.names[1],''];chatTo=2}
+  else{g=B.newGame(cfg.names.slice(),cfg.target);chatTo=null}
+  sheet=null;lastPlayed=null;closeChat();snd('deal');tick();
+}
+function openSettings(){clearTimeout(T);draft={names:cfg.names.slice(),target:cfg.target,game:cfg.game};sheet='settings';render()}
 app.addEventListener('click',function(e){
   var b=e.target.closest('[data-a]');if(!b)return;
   var a=b.getAttribute('data-a');
-  if(a==='card'){var id=b.getAttribute('data-id');if(B.play(g,0,id)){lastPlayed=id;snd(g.says[0]?'bel':'card');tick()}}
+  if(a==='card'){var id=b.getAttribute('data-id');if(g.kind==='mariage'?M.play(g,0,id):B.play(g,0,id)){lastPlayed=id;snd(g.says[0]?'bel':'card');tick()}}
+  else if(a==='mswap'){if(M.swap(g,0)){snd('take');tick()}}
+  else if(a==='mclose'){if(M.close(g,0)){snd('pass');tick()}}
+  else if(a==='game'){readDraft();draft.game=b.getAttribute('data-g');render()}
   else if(a==='take'){if(B.bid(g,0,true)){snd('take');tick()}}
   else if(a==='suit'){if(B.bid(g,0,true,b.getAttribute('data-s'))){snd('take');tick()}}
   else if(a==='pass'){if(B.bid(g,0,false)){snd('pass');tick()}}
-  else if(a==='next'){sheet=null;B.nextHand(g);snd('deal');tick()}
+  else if(a==='next'){sheet=null;if(g.kind==='mariage')M.nextDeal(g);else B.nextHand(g);snd('deal');tick()}
   else if(a==='again'){start()}
   else if(a==='lang'){readDraft();cfg.lang=cfg.lang==='fr'?'en':'fr';save();render();if(chatEl.classList.contains('open'))renderChat()}
   else if(a==='chat'){if(chatEl.classList.contains('open'))closeChat();else{chatEl.classList.add('open');renderChat()}}
   else if(a==='sound'){cfg.sound=!cfg.sound;save();render();snd('take')}
   else if(a==='values'){if(!sheet){clearTimeout(T);sheet='values';render()}}
-  else if(a==='settings'){if(!sheet||sheet==='values'){clearTimeout(T);draft={names:g.names.slice(),target:g.target};sheet='settings';render()}}
+  else if(a==='settings'){if(!sheet||sheet==='values')openSettings()}
   else if(a==='tgt'){readDraft();draft.target=+b.getAttribute('data-n');render()}
   else if(a==='close'){sheet=null;tick()}
   else if(a==='start'){
     readDraft();
     var def=['AB','Katim','Yama','Cous Cous'];
-    cfg.names=draft.names.map(function(n,i){n=n.trim();return n||def[i]});cfg.target=draft.target;save();start();
+    cfg.names=draft.names.map(function(n,i){n=n.trim();return n||def[i]});cfg.target=draft.target;cfg.game=draft.game;save();start();
   }
 });
 start();
+openSettings();
 })();
 </script>
 </body>
